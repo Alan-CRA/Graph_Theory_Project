@@ -24,11 +24,30 @@ def choose_table(folder):
 
 def build_graph(filepath):
     m = []
+    expected_id = 1
+
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             parts = list(map(int, line.split()))
-            if parts:  # Ignore empty lines
-                m.append(parts[1:])  # [duration, pred1, pred2, ...]
+            if not parts:  # Safely skip blank lines anywhere in the file
+                continue
+
+            if len(parts) < 2:
+                raise ValueError(f"Missing duration for task {parts[0]}")
+
+            if parts[0] != expected_id:
+                raise ValueError(
+                    f"Expected task ID {expected_id}, found {parts[0]}"
+                )
+
+            if parts[1] < 0:
+                raise ValueError(f"Negative duration for task {parts[0]}")
+
+            m.append(parts[1:])  # [duration, pred1, pred2, ...]
+            expected_id += 1
+
+    if not m:
+        raise ValueError("The constraint table file is empty.")
 
     n_tasks = len(m)
     n_nodes = n_tasks + 2
@@ -48,12 +67,20 @@ def build_graph(filepath):
             edges.append((0, u, 0))
         else:
             predecessors = values[1:]
+
+            if len(predecessors) != len(set(predecessors)):
+                raise ValueError(f"Duplicate predecessor for task {u}")
+
             for p in predecessors:
-                if 1 <= p <= n_tasks:
-                    w = m[p - 1][0]
-                    graph[p][u] = w
-                    has_successor[p] = True
-                    edges.append((p, u, w))
+                if not 1 <= p <= n_tasks:
+                    raise ValueError(f"Invalid predecessor {p} for task {u}")
+                if p == u:
+                    raise ValueError(f"Task {u} cannot depend on itself")
+
+                w = m[p - 1][0]
+                graph[p][u] = w
+                has_successor[p] = True
+                edges.append((p, u, w))
 
     # Connect tasks with no successors to omega (N + 1)
     for u in range(1, n_tasks + 1):
@@ -62,7 +89,6 @@ def build_graph(filepath):
             graph[u][omega] = w
             edges.append((u, omega, w))
 
-    # Sort edges for clean trace output
     edges.sort()
     print(f"{n_nodes} vertices")
     print(f"{len(edges)} edges")
@@ -94,26 +120,25 @@ def check_scheduling_graph(graph):
     n_nodes = graph.shape[0]
     is_valid = True
 
-    # 1. Single entry point & single exit point
     in_degrees = np.sum(~np.isinf(graph), axis=0)
     out_degrees = np.sum(~np.isinf(graph), axis=1)
 
     entries = np.where(in_degrees == 0)[0].tolist()
     exits = np.where(out_degrees == 0)[0].tolist()
 
-    if len(entries) == 1:
-        print(f"There is one entry point: {entries[0]}")
+    if entries == [0]:
+        print("There is one entry point: 0")
     else:
-        print(f"[ERROR] Expected 1 entry point, found: {entries}")
+        print(f"[ERROR] Expected entry point [0], found: {entries}")
         is_valid = False
 
-    if len(exits) == 1:
-        print(f"There is one exit point: {exits[0]}")
+    if exits == [n_nodes - 1]:
+        print(f"There is one exit point: {n_nodes - 1}")
     else:
-        print(f"[ERROR] Expected 1 exit point, found: {exits}")
+        print(f"[ERROR] Expected exit point [{n_nodes - 1}], found: {exits}")
         is_valid = False
 
-    # 2. Cycle detection (Method of eliminating entry points)
+    # Cycle detection (Method of eliminating entry points)
     print("\nDetecting cycles (Method of eliminating entry points):")
     remaining = set(range(n_nodes))
     work_in_deg = in_degrees.copy()
@@ -141,7 +166,7 @@ def check_scheduling_graph(graph):
     if not remaining and is_valid:
         print("-> There is no cycle")
 
-    # 3. Same weights for all outgoing edges of each vertex
+    # Same weights for all outgoing edges of each vertex
     same_weights = True
     for u in range(n_nodes):
         weights = graph[u][~np.isinf(graph[u])]
@@ -153,7 +178,7 @@ def check_scheduling_graph(graph):
     else:
         is_valid = False
 
-    # 4. Outgoing edges of entry vertex 0 have weight 0
+    # Outgoing edges of entry vertex 0 have weight 0
     entry_weights = graph[0][~np.isinf(graph[0])]
     if np.all(entry_weights == 0):
         print("Outgoing edges of entry vertex 0 have a weight of 0.")
@@ -161,7 +186,7 @@ def check_scheduling_graph(graph):
         print("[ERROR] Outgoing edges of entry vertex 0 are not all 0.")
         is_valid = False
 
-    # 5. No negative edges
+    # No negative edges
     finite_weights = graph[~np.isinf(graph)]
     if np.all(finite_weights >= 0):
         print("There are no negative-weight edges.")
@@ -183,6 +208,9 @@ def compute_ranks(graph):
 
     while remaining:
         sources = sorted([v for v in remaining if in_deg[v] == 0])
+        if not sources:
+            raise ValueError("Cycle detected: ranks cannot be assigned.")
+
         for u in sources:
             ranks[u] = current_rank
             remaining.remove(u)
@@ -272,23 +300,29 @@ def compute_calendars_and_critical_paths(graph, ranks):
         print(f"Critical Path {idx}: {' -> '.join(map(str, p))}")
 
 
-# --- MAIN LOOP ---
-files_folder = "Test files-20261124"
+def main():
+    files_folder = "Test files-20261124"
+    while True:
+        filepath = choose_table(files_folder)
+        if filepath is None:
+            print("Exiting program.")
+            break
 
-while True:
-    filepath = choose_table(files_folder)
-    if filepath is None:
-        print("Exiting program.")
-        break
+        try:
+            graph = build_graph(filepath)
+            display_matrix(graph)
 
-    graph = build_graph(filepath)
-    display_matrix(graph)
+            if check_scheduling_graph(graph):
+                ranks = compute_ranks(graph)
+                compute_calendars_and_critical_paths(graph, ranks)
+        except ValueError as e:
+            print(f"[ERROR] {e}")
 
-    if check_scheduling_graph(graph):
-        ranks = compute_ranks(graph)
-        compute_calendars_and_critical_paths(graph, ranks)
+        again = input("\nTest another constraint table? (y/n): ").strip().lower()
+        if again not in ("y", "yes"):
+            print("Exiting program.")
+            break
 
-    again = input("\nTest another constraint table? (y/n): ").strip().lower()
-    if again not in ("y", "yes"):
-        print("Exiting program.")
-        break
+
+if __name__ == "__main__":
+    main()
