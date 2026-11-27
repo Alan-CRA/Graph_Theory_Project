@@ -1,328 +1,685 @@
+
 import os
-import numpy as np
 
 
-def choose_table(folder):
+# ==========================================
+# STEP 1: CHOOSE A CONSTRAINT TABLE
+# ==========================================
+
+def choose_table():
+
+    folder = "Test files-20261124"
+
     while True:
+
         choice = input(
-            "\nEnter table number (1-14) or custom filename [or 'q' to quit]: "
+            "\nEnter table number (1-14) or q to quit: "
         ).strip()
-        if choice.lower() in ("q", "quit", "exit"):
+
+        if choice.lower() in ["q", "quit", "exit"]:
             return None
-        if choice.isdigit() and 1 <= int(choice) <= 14:
-            path = f"{folder}/table {int(choice)}.txt"
-            if os.path.isfile(path):
-                return path
-            print(f"[ERROR] File '{path}' not found.")
-        elif os.path.isfile(choice):
-            return choice
-        elif os.path.isfile(f"{folder}/{choice}"):
-            return f"{folder}/{choice}"
-        else:
-            print("[ERROR] Invalid input or file not found. Try again.")
 
+        if choice.isdigit():
 
-def build_graph(filepath):
-    m = []
-    expected_id = 1
+            number = int(choice)
 
-    with open(filepath, "r", encoding="utf-8") as f:
-        for line in f:
-            parts = list(map(int, line.split()))
-            if not parts:  # Safely skip blank lines anywhere in the file
-                continue
+            if 1 <= number <= 14:
 
-            if len(parts) < 2:
-                raise ValueError(f"Missing duration for task {parts[0]}")
-
-            if parts[0] != expected_id:
-                raise ValueError(
-                    f"Expected task ID {expected_id}, found {parts[0]}"
+                filename = os.path.join(
+                    folder, f"table {number}.txt"
                 )
 
-            if parts[1] < 0:
-                raise ValueError(f"Negative duration for task {parts[0]}")
+                if os.path.isfile(filename):
+                    return filename
 
-            m.append(parts[1:])  # [duration, pred1, pred2, ...]
-            expected_id += 1
+                else:
+                    print("Table file not found.")
 
-    if not m:
-        raise ValueError("The constraint table file is empty.")
+            else:
+                print("Please enter a number between 1 and 14.")
 
-    n_tasks = len(m)
-    n_nodes = n_tasks + 2
-    omega = n_nodes - 1
-
-    graph = np.full((n_nodes, n_nodes), np.inf)
-    has_successor = [False] * (n_tasks + 1)
-
-    print("\n--- STEP 1: Creating the scheduling graph ---")
-    edges = []
-
-    for task_idx, values in enumerate(m):
-        u = task_idx + 1
-        if len(values) == 1:
-            # No predecessors -> connect from 0 with weight 0
-            graph[0][u] = 0
-            edges.append((0, u, 0))
         else:
-            predecessors = values[1:]
+            print("Invalid input. Enter a number or q.")
+
+
+# ==========================================
+# STEP 2: READ THE FILE AND BUILD THE GRAPH
+# ==========================================
+
+def build_graph(filename):
+
+    tasks = []
+
+    with open(filename, "r", encoding="utf-8") as file:
+
+        expected_id = 1
+
+        for line in file:
+
+            if not line.strip():
+                continue
+
+            numbers = list(map(int, line.split()))
+
+            if len(numbers) < 2:
+                raise ValueError("A task is missing its duration.")
+
+            task_id = numbers[0]
+            duration = numbers[1]
+            predecessors = numbers[2:]
+
+            if task_id != expected_id:
+                raise ValueError("Task numbers must be consecutive.")
+
+            if duration < 0:
+                raise ValueError("Negative duration is not allowed.")
 
             if len(predecessors) != len(set(predecessors)):
-                raise ValueError(f"Duplicate predecessor for task {u}")
+                raise ValueError("Duplicate predecessor.")
+
+            tasks.append([duration, predecessors])
+
+            expected_id += 1
+
+    if len(tasks) == 0:
+        raise ValueError("The file is empty.")
+
+    n = len(tasks)
+
+    # Vertex 0 = project beginning
+    # Vertex n+1 = project ending
+
+    omega = n + 1
+    number_of_vertices = n + 2
+
+    # None means that there is no edge
+    graph = [
+        [None for j in range(number_of_vertices)]
+        for i in range(number_of_vertices)
+    ]
+
+    has_successor = [False] * (n + 1)
+
+    print("\n========== STEP 1: BUILDING THE GRAPH ==========")
+
+    edges = []
+
+    for i in range(n):
+
+        task = i + 1
+        duration = tasks[i][0]
+        predecessors = tasks[i][1]
+
+        # Check predecessors
+        for p in predecessors:
+
+            if p < 1 or p > n:
+                raise ValueError("Invalid predecessor.")
+
+            if p == task:
+                raise ValueError("A task cannot depend on itself.")
+
+        # Task without predecessors
+        if len(predecessors) == 0:
+
+            graph[0][task] = 0
+            edges.append((0, task, 0))
+
+        # Task with predecessors
+        else:
 
             for p in predecessors:
-                if not 1 <= p <= n_tasks:
-                    raise ValueError(f"Invalid predecessor {p} for task {u}")
-                if p == u:
-                    raise ValueError(f"Task {u} cannot depend on itself")
 
-                w = m[p - 1][0]
-                graph[p][u] = w
+                weight = tasks[p - 1][0]
+
+                graph[p][task] = weight
+
                 has_successor[p] = True
-                edges.append((p, u, w))
 
-    # Connect tasks with no successors to omega (N + 1)
-    for u in range(1, n_tasks + 1):
-        if not has_successor[u]:
-            w = m[u - 1][0]
-            graph[u][omega] = w
-            edges.append((u, omega, w))
+                edges.append((p, task, weight))
 
-    edges.sort()
-    print(f"{n_nodes} vertices")
-    print(f"{len(edges)} edges")
-    for u, v, w in edges:
-        print(f"{u} -> {v} = {int(w)}")
+    # Connect tasks without successors to omega
+
+    for task in range(1, n + 1):
+
+        if not has_successor[task]:
+
+            weight = tasks[task - 1][0]
+
+            graph[task][omega] = weight
+
+            edges.append((task, omega, weight))
+
+    print("Number of vertices:", number_of_vertices)
+    print("Number of edges:", len(edges))
+
+    for u, v, weight in sorted(edges):
+
+        print(u, "->", v, "=", weight)
 
     return graph
 
 
+# ==========================================
+# STEP 3: DISPLAY THE VALUE MATRIX
+# ==========================================
+
 def display_matrix(graph):
-    print("\n--- STEP 2: Value Matrix ---")
-    n_nodes = graph.shape[0]
-    col_w = 4
 
-    header = " " * col_w + "".join(f"{j:>{col_w}}" for j in range(n_nodes))
-    print(header)
-    print("-" * len(header))
+    print("\n========== STEP 2: VALUE MATRIX ==========")
 
-    for i in range(n_nodes):
-        row_str = f"{i:<{col_w - 1}}|"
-        for j in range(n_nodes):
-            val = "*" if np.isinf(graph[i][j]) else str(int(graph[i][j]))
-            row_str += f"{val:>{col_w}}"
-        print(row_str)
+    n = len(graph)
+
+    print("     ", end="")
+
+    for j in range(n):
+        print(f"{j:>5}", end="")
+
+    print()
+
+    for i in range(n):
+
+        print(f"{i:>3} |", end="")
+
+        for j in range(n):
+
+            if graph[i][j] is None:
+                print(f"{'*':>5}", end="")
+
+            else:
+                print(f"{graph[i][j]:>5}", end="")
+
+        print()
 
 
-def check_scheduling_graph(graph):
-    print("\n--- STEP 3: Checking Scheduling Graph Properties ---")
-    n_nodes = graph.shape[0]
-    is_valid = True
+# ==========================================
+# STEP 4: CHECK GRAPH PROPERTIES
+# ==========================================
 
-    in_degrees = np.sum(~np.isinf(graph), axis=0)
-    out_degrees = np.sum(~np.isinf(graph), axis=1)
+def check_graph(graph):
 
-    entries = np.where(in_degrees == 0)[0].tolist()
-    exits = np.where(out_degrees == 0)[0].tolist()
+    print("\n========== STEP 3: GRAPH VALIDATION ==========")
+
+    n = len(graph)
+
+    valid = True
+
+    # Calculate incoming and outgoing degrees
+
+    incoming = [0] * n
+    outgoing = [0] * n
+
+    for i in range(n):
+
+        for j in range(n):
+
+            if graph[i][j] is not None:
+
+                outgoing[i] += 1
+                incoming[j] += 1
+
+    # Check entry point
+
+    entries = []
+
+    for i in range(n):
+
+        if incoming[i] == 0:
+            entries.append(i)
 
     if entries == [0]:
+
         print("There is one entry point: 0")
-    else:
-        print(f"[ERROR] Expected entry point [0], found: {entries}")
-        is_valid = False
 
-    if exits == [n_nodes - 1]:
-        print(f"There is one exit point: {n_nodes - 1}")
     else:
-        print(f"[ERROR] Expected exit point [{n_nodes - 1}], found: {exits}")
-        is_valid = False
 
-    # Cycle detection (Method of eliminating entry points)
-    print("\nDetecting cycles (Method of eliminating entry points):")
-    remaining = set(range(n_nodes))
-    work_in_deg = in_degrees.copy()
+        print("ERROR: Entry points:", entries)
+        valid = False
+
+    # Check exit point
+
+    exits = []
+
+    for i in range(n):
+
+        if outgoing[i] == 0:
+            exits.append(i)
+
+    if exits == [n - 1]:
+
+        print("There is one exit point:", n - 1)
+
+    else:
+
+        print("ERROR: Exit points:", exits)
+        valid = False
+
+    # --------------------------------------
+    # CYCLE DETECTION
+    # Method of eliminating entry points
+    # --------------------------------------
+
+    print("\nDetecting cycles...")
+
+    remaining = set(range(n))
+
+    degree = incoming.copy()
+
+    ranks = {}
+
+    rank = 0
 
     while remaining:
-        current_entries = sorted([v for v in remaining if work_in_deg[v] == 0])
-        if not current_entries:
-            print("Entry points: None")
-            print(f"Remaining vertices: {' '.join(map(str, sorted(remaining)))}")
-            print("-> Cycle detected!")
-            is_valid = False
+
+        # Find vertices with zero incoming degree
+
+        entry_points = []
+
+        for v in sorted(remaining):
+
+            if degree[v] == 0:
+                entry_points.append(v)
+
+        # If no entry point exists, there is a cycle
+
+        if len(entry_points) == 0:
+
+            print("No entry points available.")
+            print("Remaining vertices:", sorted(remaining))
+            print("A cycle has been detected.")
+
+            valid = False
             break
 
-        print(f"Entry points: {' '.join(map(str, current_entries))}")
-        print("Eliminating entry points...")
-        for u in current_entries:
+        print("Entry points:", entry_points)
+
+        # Assign the same rank to these vertices
+
+        for u in entry_points:
+
+            ranks[u] = rank
+
+        # Eliminate these vertices
+
+        for u in entry_points:
+
             remaining.remove(u)
-            for v in range(n_nodes):
-                if not np.isinf(graph[u][v]):
-                    work_in_deg[v] -= 1
 
-        rem_str = " ".join(map(str, sorted(remaining))) if remaining else "None"
-        print(f"Remaining vertices: {rem_str}")
+            for v in range(n):
 
-    if not remaining and is_valid:
-        print("-> There is no cycle")
+                if graph[u][v] is not None:
+                    degree[v] -= 1
 
-    # Same weights for all outgoing edges of each vertex
+        print("Remaining vertices:", sorted(remaining))
+
+        rank += 1
+
+    if len(remaining) == 0:
+
+        print("There is no cycle.")
+
+    # --------------------------------------
+    # CHECK OUTGOING EDGE WEIGHTS
+    # --------------------------------------
+
     same_weights = True
-    for u in range(n_nodes):
-        weights = graph[u][~np.isinf(graph[u])]
-        if len(np.unique(weights)) > 1:
-            same_weights = False
-            print(f"[ERROR] Vertex {u} has different outgoing weights: {weights}")
+
+    for u in range(n):
+
+        weights = []
+
+        for v in range(n):
+
+            if graph[u][v] is not None:
+                weights.append(graph[u][v])
+
+        if len(weights) > 1:
+
+            if len(set(weights)) > 1:
+
+                print("ERROR: Different outgoing weights at", u)
+                same_weights = False
+
     if same_weights:
-        print("The values of outgoing edges for each vertex are the same.")
+
+        print("Outgoing weights are the same for each vertex.")
+
     else:
-        is_valid = False
 
-    # Outgoing edges of entry vertex 0 have weight 0
-    entry_weights = graph[0][~np.isinf(graph[0])]
-    if np.all(entry_weights == 0):
-        print("Outgoing edges of entry vertex 0 have a weight of 0.")
+        valid = False
+
+    # --------------------------------------
+    # CHECK WEIGHTS FROM VERTEX 0
+    # --------------------------------------
+
+    entry_weights = []
+
+    for v in range(n):
+
+        if graph[0][v] is not None:
+            entry_weights.append(graph[0][v])
+
+    if all(weight == 0 for weight in entry_weights):
+
+        print("Outgoing edges of vertex 0 have weight 0.")
+
     else:
-        print("[ERROR] Outgoing edges of entry vertex 0 are not all 0.")
-        is_valid = False
 
-    # No negative edges
-    finite_weights = graph[~np.isinf(graph)]
-    if np.all(finite_weights >= 0):
-        print("There are no negative-weight edges.")
+        print("ERROR: Outgoing weights from vertex 0 are not zero.")
+        valid = False
+
+    # --------------------------------------
+    # CHECK NEGATIVE EDGES
+    # --------------------------------------
+
+    negative = False
+
+    for i in range(n):
+
+        for j in range(n):
+
+            if graph[i][j] is not None:
+
+                if graph[i][j] < 0:
+                    negative = True
+
+    if not negative:
+
+        print("There are no negative edges.")
+
     else:
-        print("[ERROR] Graph contains negative-weight edges.")
-        is_valid = False
 
-    print("-> Valid scheduling graph!" if is_valid else "-> NOT a valid scheduling graph.")
-    return is_valid
+        print("ERROR: Negative edges detected.")
+        valid = False
 
+    # Final result
 
-def compute_ranks(graph):
-    print("\n--- STEP 4: Computing Ranks ---")
-    n_nodes = graph.shape[0]
-    in_deg = np.sum(~np.isinf(graph), axis=0)
-    remaining = set(range(n_nodes))
-    ranks = {}
-    current_rank = 0
+    if valid:
 
-    while remaining:
-        sources = sorted([v for v in remaining if in_deg[v] == 0])
-        if not sources:
-            raise ValueError("Cycle detected: ranks cannot be assigned.")
+        print("\nThis is a valid scheduling graph.")
 
-        for u in sources:
-            ranks[u] = current_rank
-            remaining.remove(u)
-        for u in sources:
-            for v in range(n_nodes):
-                if not np.isinf(graph[u][v]):
-                    in_deg[v] -= 1
-        current_rank += 1
+    else:
 
-    print(f"{'Vertex':<8} | {'Rank':<6}")
-    print("-" * 17)
-    for v, r in sorted(ranks.items(), key=lambda x: (x[1], x[0])):
-        print(f"{v:<8} | {r:<6}")
+        print("\nThis is NOT a valid scheduling graph.")
 
-    return ranks
+    return valid, ranks
 
 
-def compute_calendars_and_critical_paths(graph, ranks):
-    print("\n--- STEP 5: Calendars and Floats ---")
-    n_nodes = graph.shape[0]
-    omega = n_nodes - 1
-    topo_order = [v for v, _ in sorted(ranks.items(), key=lambda x: (x[1], x[0]))]
+# ==========================================
+# STEP 5: CALCULATE EARLIEST AND LATEST DATES
+# ==========================================
 
-    # Earliest dates (Forward pass)
-    earliest = np.zeros(n_nodes, dtype=int)
-    for u in topo_order:
-        for v in range(n_nodes):
-            if not np.isinf(graph[u][v]):
-                w = int(graph[u][v])
-                if earliest[u] + w > earliest[v]:
-                    earliest[v] = earliest[u] + w
+def calculate_calendars(graph, ranks):
 
-    # Latest dates (Backward pass)
-    latest = np.full(n_nodes, earliest[omega], dtype=int)
-    for u in reversed(topo_order):
-        for v in range(n_nodes):
-            if not np.isinf(graph[u][v]):
-                w = int(graph[u][v])
-                if latest[v] - w < latest[u]:
-                    latest[u] = latest[v] - w
+    print("\n========== STEP 4: CALCULATING RANKS ==========")
 
-    # Total float & Free float
-    total_float = latest - earliest
-    free_float = np.zeros(n_nodes, dtype=int)
-    for u in range(n_nodes):
-        succs = [v for v in range(n_nodes) if not np.isinf(graph[u][v])]
-        if succs:
-            free_float[u] = min(
-                earliest[v] - earliest[u] - int(graph[u][v]) for v in succs
-            )
+    n = len(graph)
 
-    header = (
-        f"{'Vertex':<8} | {'Rank':<6} | {'Earliest':<10} | "
-        f"{'Latest':<10} | {'Total Float':<12} | {'Free Float':<10}"
+    # Sort vertices by rank
+
+    order = sorted(ranks, key=lambda v: (ranks[v], v))
+
+    for v in order:
+
+        print("Vertex:", v, " Rank:", ranks[v])
+
+    # --------------------------------------
+    # EARLIEST DATES: FORWARD PASS
+    # --------------------------------------
+
+    print("\n========== EARLIEST DATES ==========")
+
+    earliest = [0] * n
+
+    for u in order:
+
+        for v in range(n):
+
+            if graph[u][v] is not None:
+
+                weight = graph[u][v]
+
+                new_date = earliest[u] + weight
+
+                if new_date > earliest[v]:
+
+                    earliest[v] = new_date
+
+    # --------------------------------------
+    # LATEST DATES: BACKWARD PASS
+    # --------------------------------------
+
+    print("\n========== LATEST DATES ==========")
+
+    omega = n - 1
+
+    project_duration = earliest[omega]
+
+    latest = [project_duration] * n
+
+    for u in reversed(order):
+
+        for v in range(n):
+
+            if graph[u][v] is not None:
+
+                weight = graph[u][v]
+
+                new_date = latest[v] - weight
+
+                if new_date < latest[u]:
+
+                    latest[u] = new_date
+
+    # --------------------------------------
+    # CALCULATE TOTAL FLOAT
+    # --------------------------------------
+
+    total_float = [0] * n
+
+    for i in range(n):
+
+        total_float[i] = latest[i] - earliest[i]
+
+    # --------------------------------------
+    # CALCULATE FREE FLOAT
+    # --------------------------------------
+
+    free_float = [0] * n
+
+    for u in range(n):
+
+        successors = []
+
+        for v in range(n):
+
+            if graph[u][v] is not None:
+                successors.append(v)
+
+        if len(successors) > 0:
+
+            values = []
+
+            for v in successors:
+
+                value = (
+                    earliest[v]
+                    - earliest[u]
+                    - graph[u][v]
+                )
+
+                values.append(value)
+
+            free_float[u] = min(values)
+
+    # --------------------------------------
+    # DISPLAY RESULTS
+    # --------------------------------------
+
+    print("\n========== CALENDAR RESULTS ==========")
+
+    print(
+        f"{'Vertex':<10}"
+        f"{'Rank':<10}"
+        f"{'Earliest':<12}"
+        f"{'Latest':<12}"
+        f"{'Total Float':<14}"
+        f"{'Free Float':<12}"
     )
-    print(header)
-    print("-" * len(header))
-    for v in topo_order:
+
+    for v in order:
+
         print(
-            f"{v:<8} | {ranks[v]:<6} | {earliest[v]:<10} | "
-            f"{latest[v]:<10} | {total_float[v]:<12} | {free_float[v]:<10}"
+            f"{v:<10}"
+            f"{ranks[v]:<10}"
+            f"{earliest[v]:<12}"
+            f"{latest[v]:<12}"
+            f"{total_float[v]:<14}"
+            f"{free_float[v]:<12}"
         )
 
-    # Step 6: Critical Path(s)
-    print("\n--- STEP 6: Critical Path(s) ---")
+    return earliest, latest, total_float
+
+
+# ==========================================
+# STEP 6: FIND CRITICAL PATHS
+# ==========================================
+
+def find_critical_paths(graph, earliest, total_float):
+
+    print("\n========== STEP 5: CRITICAL PATHS ==========")
+
+    n = len(graph)
+
+    omega = n - 1
+
     paths = []
 
-    def dfs(u, path):
-        if u == omega:
-            paths.append(list(path))
+    # Depth First Search
+
+    def dfs(current, path):
+
+        # If we reach the final vertex,
+        # we have found a complete critical path
+
+        if current == omega:
+
+            paths.append(path.copy())
             return
-        for v in range(n_nodes):
-            if not np.isinf(graph[u][v]):
-                w = int(graph[u][v])
+
+        # Explore all successors
+
+        for next_vertex in range(n):
+
+            weight = graph[current][next_vertex]
+
+            if weight is not None:
+
+                # Check whether the edge is critical
+
                 if (
-                    total_float[u] == 0
-                    and total_float[v] == 0
-                    and earliest[u] + w == earliest[v]
+                    total_float[current] == 0
+                    and total_float[next_vertex] == 0
+                    and earliest[current] + weight
+                    == earliest[next_vertex]
                 ):
-                    path.append(v)
-                    dfs(v, path)
+
+                    path.append(next_vertex)
+
+                    dfs(next_vertex, path)
+
+                    # Backtracking
+
                     path.pop()
 
-    dfs(0, [0])
-    print(f"Minimum Project Duration: {earliest[omega]}")
-    for idx, p in enumerate(paths, 1):
-        print(f"Critical Path {idx}: {' -> '.join(map(str, p))}")
+    # Start from vertex 0
 
+    dfs(0, [0])
+
+    print("Minimum project duration:", earliest[omega])
+
+    if len(paths) == 0:
+
+        print("No critical path found.")
+
+    else:
+
+        for i, path in enumerate(paths, start=1):
+
+            print("Critical path", i, ":", " -> ".join(
+                map(str, path)
+            ))
+
+
+# ==========================================
+# MAIN PROGRAM
+# ==========================================
 
 def main():
-    files_folder = "Test files-20261124"
+
+    print("===================================")
+    print("       PROJECT SCHEDULING")
+    print("===================================")
+
     while True:
-        filepath = choose_table(files_folder)
-        if filepath is None:
-            print("Exiting program.")
+
+        filename = choose_table()
+
+        if filename is None:
+
+            print("Program finished.")
             break
 
         try:
-            graph = build_graph(filepath)
+
+            # Step 1: Build graph
+
+            graph = build_graph(filename)
+
+            # Step 2: Display matrix
+
             display_matrix(graph)
 
-            if check_scheduling_graph(graph):
-                ranks = compute_ranks(graph)
-                compute_calendars_and_critical_paths(graph, ranks)
-        except ValueError as e:
-            print(f"[ERROR] {e}")
+            # Step 3: Validate graph
 
-        again = input("\nTest another constraint table? (y/n): ").strip().lower()
-        if again not in ("y", "yes"):
-            print("Exiting program.")
+            valid, ranks = check_graph(graph)
+
+            # Continue only if graph is valid
+
+            if valid:
+
+                # Step 4 and 5: Calculate calendars
+
+                earliest, latest, total_float = (
+                    calculate_calendars(graph, ranks)
+                )
+
+                # Step 6: Find critical paths
+
+                find_critical_paths(
+                    graph,
+                    earliest,
+                    total_float
+                )
+
+        except (ValueError, OSError) as error:
+
+            print("\nERROR:", error)
+
+        # Ask whether the user wants another table
+
+        answer = input(
+            "\nDo you want to test another table? (y/n): "
+        ).strip().lower()
+
+        if answer not in ["y", "yes"]:
+
+            print("Program finished.")
             break
 
 
+# Start the program
+
 if __name__ == "__main__":
+
     main()
